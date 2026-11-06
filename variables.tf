@@ -1,7 +1,7 @@
 variable "location" {
   description = "Azure region for the lab"
   type        = string
-  default     = "eastus"
+  default     = "centralus"
 }
 
 variable "prefix" {
