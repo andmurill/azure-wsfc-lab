@@ -31,3 +31,33 @@ variable "subnet_prefix" {
   type        = string
   default     = "10.10.1.0/24"
 }
+
+variable "vm_size" {
+  description = "Size of all lab VMs"
+  type        = string
+  default     = "Standard_B2ms"
+}
+
+variable "admin_username" {
+  description = "Local administrator user name for the VMs"
+  type        = string
+  default     = "labadmin"
+}
+
+variable "dc_private_ip" {
+  description = "Static private IP of the domain controller"
+  type        = string
+  default     = "10.10.1.10"
+}
+
+variable "shutdown_time" {
+  description = "Daily auto-shutdown time in HHmm"
+  type        = string
+  default     = "2300"
+}
+
+variable "shutdown_timezone" {
+  description = "Windows time zone ID used for the auto-shutdown schedule"
+  type        = string
+  default     = "Central America Standard Time"
+}
