@@ -22,3 +22,12 @@ output "admin_password" {
   value     = random_password.admin.result
   sensitive = true
 }
+
+output "witness_account_name" {
+  value = azurerm_storage_account.witness.name
+}
+
+output "witness_account_key" {
+  value     = azurerm_storage_account.witness.primary_access_key
+  sensitive = true
+}
