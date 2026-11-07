@@ -73,3 +73,12 @@ variable "domain_netbios" {
   type        = string
   default     = "LAB"
 }
+
+variable "node_names" {
+  description = "Cluster node names and their static private IPs"
+  type        = map(string)
+  default = {
+    NODE1 = "10.10.1.11"
+    NODE2 = "10.10.1.12"
+  }
+}

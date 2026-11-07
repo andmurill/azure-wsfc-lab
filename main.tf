@@ -6,6 +6,7 @@ resource "azurerm_resource_group" "lab" {
 resource "azurerm_virtual_network" "lab" {
   name                = "vnet-${var.prefix}-lab"
   address_space       = var.vnet_address_space
+  dns_servers         = [var.dc_private_ip]
   location            = azurerm_resource_group.lab.location
   resource_group_name = azurerm_resource_group.lab.name
 }
