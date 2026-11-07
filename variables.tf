@@ -61,3 +61,15 @@ variable "shutdown_timezone" {
   type        = string
   default     = "Central America Standard Time"
 }
+
+variable "domain_name" {
+  description = "DNS name of the Active Directory forest"
+  type        = string
+  default     = "lab.local"
+}
+
+variable "domain_netbios" {
+  description = "NetBIOS name of the domain"
+  type        = string
+  default     = "LAB"
+}
