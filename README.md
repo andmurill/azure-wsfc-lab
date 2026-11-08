@@ -1,19 +1,32 @@
-# Azure Windows Server Failover Cluster Lab (Terraform)
+<div align="center">
 
-![terraform-checks](https://github.com/andmurill/azure-wsfc-lab/actions/workflows/terraform.yml/badge.svg)
+<img src="docs/images/banner.svg" alt="Azure Failover Cluster Lab: Windows Server 2022, Terraform, Cloud Witness" width="100%">
 
-> One `terraform apply` builds a domain controller, two domain-joined Windows Server nodes, a failover cluster and a cloud witness in Azure. Tested end to end from an empty resource group in about 24 minutes.
+[![terraform-checks](https://github.com/andmurill/azure-wsfc-lab/actions/workflows/terraform.yml/badge.svg)](https://github.com/andmurill/azure-wsfc-lab/actions/workflows/terraform.yml)
+![Terraform](https://img.shields.io/badge/Terraform-1.17-7B42BC?logo=terraform&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-centralus-0078D4?logo=microsoftazure&logoColor=white)
+![Windows Server](https://img.shields.io/badge/Windows%20Server-2022-0078D6?logo=windows&logoColor=white)
+![Deploy time](https://img.shields.io/badge/deploy-~24%20min-2EA44F)
 
-I built this lab to combine my background in Windows Server clustering and high availability with infrastructure as code. Everything is automated: the network, the VMs, the Active Directory forest, the domain joins, the cluster and the witness. A small GitHub Actions workflow checks formatting and validity on every push.
+**One `terraform apply` builds a domain controller, two domain-joined Windows Server nodes, a failover cluster and a cloud witness in Azure.**
+
+[What it builds](#what-it-builds) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Design decisions](#design-decisions-and-trade-offs) · [Verification](#verification-and-failover-test) · [Troubleshooting](#troubleshooting-log) · [Roadmap](#roadmap)
+
+</div>
+
+---
+
+I built this lab to combine my background in Windows Server clustering and high availability with infrastructure as code. Everything is automated: the network, the VMs, the Active Directory forest, the domain joins, the cluster and the witness. A GitHub Actions workflow checks formatting and validity on every push.
+
+## At a glance
 
 | | |
 |---|---|
-| **Stack** | Terraform (azurerm 4.x, random, time), Azure VMs, Windows Server 2022, AD DS, Windows Server Failover Clustering, GitHub Actions |
-| **Size** | 24 Terraform resources, 3 VMs |
-| **Build time** | About 24 minutes for plan and apply from zero (tested 2026-11-08) |
-| **Tested with** | Terraform 1.17.0, azurerm 4.81.0, Azure CLI 2.91.0, region `centralus` |
-
-**Contents:** [What it builds](#what-it-builds) · [What this demonstrates](#what-this-demonstrates) · [Deployment flow](#deployment-flow) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Design decisions](#design-decisions-and-trade-offs) · [Verification](#verification-and-failover-test) · [Cost and cleanup](#cost-and-cleanup) · [Security and limitations](#security-notes-and-known-limitations) · [Troubleshooting log](#troubleshooting-log) · [Reference](#reference) · [Roadmap](#roadmap)
+| **Result** | AD DS forest `lab.local`, a two-node Windows Server failover cluster `WSFC01` and an Azure Cloud Witness |
+| **Size** | 24 Terraform resources, 3 VMs (`Standard_B2ms`) |
+| **Measured build time** | 23 min 45 s from an empty resource group: 24 s plan, 22 min 21 s apply, of which 9 min are deliberate waits for reboots |
+| **Tested with** | Terraform 1.17.0, azurerm 4.81.0, Azure CLI 2.91.0, region `centralus`, tested 2026-11-08 |
+| **Skills shown** | Terraform, remote state, Azure networking and compute, unattended AD DS and WSFC, CI, troubleshooting |
 
 ## What it builds
 
@@ -40,18 +53,13 @@ flowchart LR
 
 ## What this demonstrates
 
-**Terraform**
-- Remote state in Azure Storage with state locking
-- `for_each` over a map, implicit references and explicit ordering with `depends_on` and `time_sleep`
-- Generated secrets (`random_password`), sensitive outputs, and protected extension settings
-- Variable validation, saved plans (`plan -out`), `-replace` and `plan -destroy`
-- VM extensions and Run Command for guest configuration
-- CI with `fmt -check`, `init -backend=false` and `validate`
-
-**Windows Server and Azure**
-- Unattended AD DS forest promotion and domain join
-- Failover clustering in Azure: distributed network name and cloud witness
-- A documented troubleshooting log built from real failures (see below)
+| Terraform | Windows Server and Azure |
+|---|---|
+| Remote state in Azure Storage with locking | Unattended AD DS forest promotion and domain join |
+| `for_each` over a map, `depends_on` and `time_sleep` for ordering | Failover clustering in Azure with a distributed network name |
+| Generated secrets, sensitive outputs, protected extension settings | Azure Cloud Witness for a two-node quorum |
+| Variable validation, saved plans, `-replace`, `plan -destroy` | VM extensions and Run Command for guest configuration |
+| CI with `fmt -check`, `init -backend=false`, `validate` | A troubleshooting log built from real failures |
 
 ## Deployment flow
 
@@ -69,16 +77,19 @@ flowchart TD
   W --> G
 ```
 
-Timings from the tested run (approximate):
+Measured on 2026-11-08 with `scripts/measure-deploy.ps1`, starting from an empty resource group:
 
 | Stage | Time |
 |---|---|
-| Network, VMs, witness account (in parallel) | 1 to 2 min |
-| DC promotion extension | 5 min |
-| Wait for DC reboot | 5 min |
-| Node domain joins (in parallel) | under 1 min |
-| Wait for node reboots | 4 min |
-| Cluster creation and witness | 4 min |
+| Network, VMs, witness account (largely in parallel) | about 3 min |
+| DC01 promotion extension | 6 min 26 s |
+| Wait for the DC reboot (`time_sleep`) | 5 min |
+| Node domain joins (in parallel) | 1 min 37 s |
+| Wait for the node reboots (`time_sleep`) | 4 min |
+| Cluster creation and witness (Run Command) | 4 min 06 s |
+| **Plan 24 s + apply 22 min 21 s** | **23 min 45 s** |
+
+Nine of those minutes are fixed waits. Replacing them with readiness checks is on the [roadmap](#roadmap).
 
 ## Quick start
 
@@ -146,6 +157,8 @@ terraform apply main.tfplan
 
 The plan should end with `Plan: 24 to add, 0 to change, 0 to destroy.` Applying the saved plan runs exactly what you reviewed.
 
+To time a deployment instead, run `.\scripts\measure-deploy.ps1`. It runs the same plan and apply with UTC timestamps and writes a report to `timing\` (git-ignored) with the plan, apply and total time, the longest resources and a timeline.
+
 ### 5. Connect
 
 The admin password is generated and never committed. Copy it to the clipboard and open RDP to DC01:
@@ -171,7 +184,7 @@ This removes the whole lab. The state storage account was created outside Terraf
 
 ## How it works
 
-**Domain controller** (`dc_promotion.tf`). A Custom Script Extension runs a PowerShell script on DC01. It installs the AD DS role and runs `Install-ADDSForest` for `lab.local` with `-NoRebootOnCompletion`, then schedules a restart 30 seconds later. The delayed restart lets the extension report success first. The script checks whether the machine is already a domain controller and exits if so, so it is safe to re-run.
+**Domain controller** (`dc_promotion.tf`). A Custom Script Extension runs a PowerShell script on DC01. It installs the AD DS role and runs `Install-ADDSForest` for `lab.local` with `-NoRebootOnCompletion`, then schedules a restart 30 seconds later. The delayed restart lets the extension report success first. The script checks whether the machine is already a domain controller and exits if so, so it is safe to re-run. It writes a plain progress log (`C:\promote-dc.log`) that never records the command line.
 
 **Domain join** (`nodes.tf`). NODE1 and NODE2 are created with `for_each` over the `node_names` map. A `time_sleep` of 5 minutes waits for the DC to reboot, then the `JsonADDomainExtension` joins each node to the domain. The VNet's DNS setting points at DC01, so name resolution works from the first boot.
 
@@ -182,7 +195,7 @@ This removes the whole lab. The state storage account was created outside Terraf
 3. The worker installs Failover Clustering on both nodes and runs `New-Cluster` with a distributed network name. If a cluster already exists, creation is skipped.
 4. Back in the main script, `Set-ClusterQuorum -CloudWitness` configures the witness.
 
-The admin password and the witness key are passed as protected parameters, so they are not part of the script text. For reference, the automation is equivalent to:
+The admin password and the witness key are passed as protected settings, so they are not part of the script text. For reference, the automation is equivalent to:
 
 ```powershell
 Invoke-Command -ComputerName NODE1,NODE2 -ScriptBlock { Install-WindowsFeature Failover-Clustering -IncludeManagementTools }
@@ -197,7 +210,7 @@ Set-ClusterQuorum -CloudWitness -AccountName "<witness account>" -AccessKey $key
 | Distributed network name for the cluster | A cluster IP address needs an Azure internal load balancer before clients can reach it. A distributed network name registers the node IPs in DNS instead. | The cluster name resolves to both node IPs. Fine for management, not a single client endpoint. |
 | Cloud witness | Two nodes need a third vote to survive losing one. A storage account is cheaper and simpler than a third VM or a shared disk. | The nodes need outbound HTTPS to the storage endpoint. |
 | Run Command plus a scheduled task | Run Command's `run_as_user` logon had no network credentials (error 1312). A scheduled task logon keeps them, so the worker can reach NODE2 and create the cluster object in AD. | More moving parts than a single script. |
-| `time_sleep` between stages | Extensions report success before the VM restarts, so dependent steps would start too early. | Fixed delays, not readiness checks. The cluster script does poll WinRM before it starts. |
+| `time_sleep` between stages | Extensions report success before the VM restarts, so dependent steps would start too early. | Fixed delays, 9 of the 22 apply minutes, not readiness checks. The cluster script does poll WinRM before it starts. |
 | Remote state in Azure Storage | Shared state with locking, and secrets stay out of the repo. | The state account is a bootstrap step outside Terraform. |
 | Public IP only on DC01 | The nodes are not exposed, and DC01 doubles as the jump host. | A public IP is billed and exposed to one allowed address. Azure Bastion would be cleaner. |
 | `centralus`, `Standard_B2ms` | `eastus` sizes were restricted for the test subscription. B2ms (2 vCPU, 8 GB) is the smallest size that runs a DC and cluster nodes comfortably. | Check size and quota in your subscription. |
@@ -247,7 +260,7 @@ NODE2 Up
 ## Cost and cleanup
 
 - Three `Standard_B2ms` VMs, StandardSSD OS disks, a Standard static public IP and a small storage account. Check current prices for your region.
-- Each VM has an auto-shutdown at 23:00 Costa Rica time (`Central America Standard Time`), which deallocates it. Change `shutdown_time` and `shutdown_timezone` to suit you.
+- Each VM has an auto-shutdown at 23:00 `Central America Standard Time` (UTC-6), which deallocates it. Change `shutdown_time` and `shutdown_timezone` to suit you.
 - Shutting down from inside Windows still bills compute. To stop billing without destroying the lab, deallocate:
 
   ```powershell
@@ -261,8 +274,8 @@ NODE2 Up
 
 **What is in place**
 - RDP is allowed from one IP address only, and the nodes have no public IP.
-- Passwords are generated, not hardcoded, and are passed to guest scripts through protected settings and parameters.
-- `terraform.tfvars`, state files and plan files are in `.gitignore`, and the state lives in a private storage account.
+- Passwords are generated, not hardcoded, and are passed to guest scripts through protected settings.
+- `terraform.tfvars`, state files, plan files and timing reports are in `.gitignore`, and the state lives in a private storage account.
 - CI needs no Azure credentials, so no secrets are stored in GitHub.
 - After any accidental exposure of the witness key, rotate it with `az storage account keys renew`.
 
@@ -310,6 +323,8 @@ Real problems hit while building this.
 | `cluster.tf` | Wait for the nodes, then create the cluster and configure the witness |
 | `outputs.tf` | IPs, admin user, and the sensitive password and witness key |
 | `terraform.tfvars.example` | Template for your private `terraform.tfvars` |
+| `scripts/measure-deploy.ps1` | Times plan and apply and writes a per-resource report |
+| `docs/images/banner.svg` | README banner |
 | `.github/workflows/terraform.yml` | `fmt -check`, `init -backend=false` and `validate` on every push |
 
 </details>
@@ -354,11 +369,13 @@ Real problems hit while building this.
 
 ## Roadmap
 
-- Split the configuration into modules (network, domain controller, nodes)
-- Replace default outbound access with a NAT gateway or a storage service endpoint
-- Move secrets to Key Vault, with separate domain admin and DSRM passwords
-- Azure Bastion instead of a public IP on DC01
-- Shared storage: Storage Spaces Direct or an Azure shared disk
-- A second domain controller
-- Optional: a SQL Server failover cluster instance or Always On availability group on top of the cluster
-- CI: add `tflint` and a security scanner, and a `plan` job that signs in with OIDC federation
+- [ ] Replace the fixed waits with readiness checks, to cut the 9 minutes of `time_sleep`
+- [ ] Split the configuration into modules (network, domain controller, nodes)
+- [ ] Replace default outbound access with a NAT gateway or a storage service endpoint
+- [ ] Move secrets to Key Vault, with separate domain admin and DSRM passwords
+- [ ] Azure Bastion instead of a public IP on DC01
+- [ ] Shared storage: Storage Spaces Direct or an Azure shared disk
+- [ ] A second domain controller
+- [ ] Optional: a SQL Server failover cluster instance or Always On availability group on top of the cluster
+- [ ] CI: add `tflint` and a secret scanner, and a `plan` job that signs in with OIDC federation
+- [ ] Add a LICENSE file
