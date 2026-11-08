@@ -1,17 +1,26 @@
 locals {
   promote_script = <<-EOT
     $ErrorActionPreference = 'Stop'
-    Start-Transcript -Path 'C:\promote-dc.log' -Append
-    if ((Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4) {
-      Write-Output 'Already a domain controller - nothing to do.'
-      Stop-Transcript
-      exit 0
+    $log = 'C:\promote-dc.log'
+    Remove-Item $log -Force -ErrorAction SilentlyContinue
+    function Write-Log($msg) { Add-Content -Path $log -Value ("{0}  {1}" -f (Get-Date -Format s), $msg) }
+
+    try {
+      if ((Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4) {
+        Write-Log 'Already a domain controller - nothing to do.'
+        exit 0
+      }
+      Write-Log 'Installing the AD DS role'
+      Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
+      Write-Log 'Promoting to a new forest'
+      $safe = ConvertTo-SecureString '${random_password.admin.result}' -AsPlainText -Force
+      Install-ADDSForest -DomainName '${var.domain_name}' -DomainNetbiosName '${var.domain_netbios}' -SafeModeAdministratorPassword $safe -InstallDns -NoRebootOnCompletion -Force | Out-Null
+      Write-Log 'Promotion finished - restarting in 30 seconds'
+      shutdown.exe /r /t 30 /c "AD DS promotion finished - restarting"
+    } catch {
+      Write-Log ('FAILED: ' + $_.Exception.Message)
+      exit 1
     }
-    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
-    $safe = ConvertTo-SecureString '${random_password.admin.result}' -AsPlainText -Force
-    Install-ADDSForest -DomainName '${var.domain_name}' -DomainNetbiosName '${var.domain_netbios}' -SafeModeAdministratorPassword $safe -InstallDns -NoRebootOnCompletion -Force
-    shutdown.exe /r /t 30 /c "AD DS promotion finished - restarting"
-    Stop-Transcript
   EOT
 }
 
