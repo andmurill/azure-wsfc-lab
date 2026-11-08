@@ -82,3 +82,9 @@ variable "node_names" {
     NODE2 = "10.10.1.12"
   }
 }
+
+variable "cluster_name" {
+  description = "Name of the failover cluster"
+  type        = string
+  default     = "WSFC01"
+}
