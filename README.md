@@ -201,7 +201,7 @@ Set-ClusterQuorum -CloudWitness -AccountName "<witness account>" -AccessKey $key
 | Remote state in Azure Storage | Shared state with locking, and secrets stay out of the repo. | The state account is a bootstrap step outside Terraform. |
 | Public IP only on DC01 | The nodes are not exposed, and DC01 doubles as the jump host. | A public IP is billed and exposed to one allowed address. Azure Bastion would be cleaner. |
 | `centralus`, `Standard_B2ms` | `eastus` sizes were restricted for the test subscription. B2ms (2 vCPU, 8 GB) is the smallest size that runs a DC and cluster nodes comfortably. | Check size and quota in your subscription. |
-| Protected parameters and no transcript in the cluster script | Keeps the password and key out of script text and logs. | The values still reach the process command line, so never add a transcript to a script that receives secrets. |
+| Protected settings, and no transcripts in scripts that receive secrets | Keeps the password and key out of script text and logs. | The values still reach the process command line, so a transcript (or any logging of the command line) would record them. |
 
 ## Verification and failover test
 
@@ -268,7 +268,7 @@ NODE2 Up
 
 **Known limitations (this is a lab)**
 - One generated password is used for the local admin, the domain admin and the directory services restore mode (DSRM) password. It is also stored in Terraform state. Production designs should use Key Vault, separate secrets and managed identities.
-- The password is embedded in the extension script that promotes DC01, so treat DC01 and any logs on it as sensitive, and don't copy them off the VM.
+- The password is embedded in the script that promotes DC01 and passed through protected settings. The script no longer writes it to a log, but it is still stored in Terraform state.
 - The nodes reach the witness storage endpoint through default outbound access. That feature is being phased out for new virtual networks, so a NAT gateway or a storage service endpoint is the durable fix.
 - The cluster script and the join logic refer to `NODE1` and `NODE2` by name, so the `node_names` map is not yet a fully general node count.
 - The cluster is created with `-NoStorage` and uses only a witness. There is no shared storage and a single domain controller.
@@ -289,6 +289,7 @@ Real problems hit while building this.
 | `Set-ClusterQuorum` failed with "error occurred while validating access to Azure" | The command used an example storage account name instead of the real one | Read the name from `terraform output -raw witness_account_name` |
 | Run Command with `run_as_user` failed on the second node (error 1312, "A specified logon session does not exist") | The Run Command logon carried no network credentials, so `Invoke-Command` to NODE2 failed even though `Test-WSMan` passed | Registered a scheduled task with the domain admin's stored credentials, since a task logon keeps them |
 | The witness key appeared in a log file | `Start-Transcript` recorded the process command line, which included the protected parameters | Removed the transcript from the main script, deleted the logs, rotated the key |
+| `C:\promote-dc.log` on DC01 contained the encoded command line, and so the lab password | The promotion script used `Start-Transcript`, which records the process command line | Replaced the transcript with a plain progress log that never records the command line, and removed the old log. Verified by counting `EncodedCommand` matches in the script log and the extension handler logs (0 each) |
 | "A resource with the ID ... already exists" on apply | A failed Run Command create left the object in Azure but not in Terraform state | Deleted it with `az vm run-command delete` and planned again (`terraform import` would also work) |
 
 ## Reference
